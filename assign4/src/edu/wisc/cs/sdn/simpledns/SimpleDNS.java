@@ -88,7 +88,7 @@ public class SimpleDNS
 			System.out.println("We are trying to connect...");
 			server = new DatagramSocket(DNSPORT);
 			System.out.println("server established....");
-			server.receive(p = new DatagramPacket(packet, MAXPACKETSIZE));
+			server.receive(new DatagramPacket(packet, MAXPACKETSIZE));
 			System.out.println("got information");
 			
 			dnsPacket = DNS.deserialize(packet, packet.length);
@@ -105,7 +105,7 @@ public class SimpleDNS
 			if(question.getType() == DNS.TYPE_A || question.getType() == DNS.TYPE_AAAA || question.getType() == DNS.TYPE_CNAME || question.getType() == DNS.TYPE_NS){
 				System.out.println("We have a good question!");
 				//handle query
-				
+				handleQuery(dnsPacket);
 			}
 			
 			//server.close();
@@ -114,5 +114,9 @@ public class SimpleDNS
 			System.exit(1);
 		}	
 		return;
+	}
+	
+	private static void handleQuery(DNS dnsPacket){
+		
 	}
 }
