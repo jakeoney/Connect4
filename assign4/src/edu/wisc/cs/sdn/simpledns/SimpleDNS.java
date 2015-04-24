@@ -7,15 +7,22 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.UnknownHostException;
+import java.util.List;
 
 import edu.wisc.cs.sdn.simpledns.packet.DNS;
 import edu.wisc.cs.sdn.simpledns.packet.DNSQuestion;
+import edu.wisc.cs.sdn.simpledns.packet.DNSRdataAddress;
+import edu.wisc.cs.sdn.simpledns.packet.DNSResourceRecord;
 
 public class SimpleDNS 
 {
-	private final static int DNSPORT = 8053;
+	private final static int DNSPORT = 53;
+	private final static int LOCALDNSPORT = 8053;
 	private final static int MAXPACKETSIZE = 65535;
+
+	static DatagramSocket server; 
 
 	public static void main(String[] args)
 	{
@@ -81,14 +88,15 @@ public class SimpleDNS
 		byte packet[] = new byte[MAXPACKETSIZE];
 		DNS dnsPacket;
 		DNSQuestion question;
-		DatagramSocket server; 
 		DatagramPacket p;
 
 		try {
 			System.out.println("We are trying to connect...");
-			server = new DatagramSocket(DNSPORT);
+			server = new DatagramSocket(LOCALDNSPORT);
 			System.out.println("server established....");
-			server.receive(new DatagramPacket(packet, MAXPACKETSIZE));
+			
+	        DatagramPacket dPkt = new DatagramPacket(packet, packet.length);
+			server.receive(dPkt);
 			System.out.println("got information");
 			
 			dnsPacket = DNS.deserialize(packet, packet.length);
@@ -104,8 +112,9 @@ public class SimpleDNS
 			question = dnsPacket.getQuestions().get(0);
 			if(question.getType() == DNS.TYPE_A || question.getType() == DNS.TYPE_AAAA || question.getType() == DNS.TYPE_CNAME || question.getType() == DNS.TYPE_NS){
 				System.out.println("We have a good question!");
+				printInfo(dnsPacket);
 				//handle query
-				handleQuery(dnsPacket);
+				handleQuery(dnsPacket, rootServerIP, dPkt);
 			}
 			
 			//server.close();
@@ -115,8 +124,87 @@ public class SimpleDNS
 		}	
 		return;
 	}
+
 	
-	private static void handleQuery(DNS dnsPacket){
-		
+	private static void handleQuery(DNS dnsPkt, String ip, DatagramPacket toReturnToSender) throws IOException
+	{
+		byte packet[] = new byte[MAXPACKETSIZE];
+		DatagramPacket query;
+		InetAddress address = null;
+		DatagramSocket socket = new DatagramSocket(DNSPORT);
+		boolean done = false;
+		address = InetAddress.getByName(ip);
+		int ttl = 100; //incase host unknown
+
+		while(!done || (ttl > 0)){
+			System.out.println("constructed query");
+			query = new DatagramPacket(dnsPkt.serialize(), 0, dnsPkt.getLength(), address, DNSPORT);
+
+			System.out.println("sending query");
+			socket.send(query);
+
+			System.out.println("waiting to receive packet");
+
+			socket.receive(new DatagramPacket(packet, packet.length));
+
+			System.out.println("received packet!!!!");
+
+			dnsPkt = DNS.deserialize(packet, packet.length);    
+			printInfo(dnsPkt);
+
+			if(!dnsPkt.isRecursionDesired()){
+				//forward back to host
+				sendToClient(dnsPkt, toReturnToSender);
+				done = true;
+			}
+			else{
+				List<DNSResourceRecord> answers = dnsPkt.getAnswers();
+				//once we are finished... maybe
+				if(answers.size() > 0){
+					System.out.println("ever here?");
+					sendToClient(dnsPkt, toReturnToSender);
+					done = true;
+				}
+				dnsPkt.setQuery(true);
+				for(DNSResourceRecord adtl : dnsPkt.getAdditional()){
+					if(adtl.getType() == DNS.TYPE_A || adtl.getType() == DNS.TYPE_AAAA){
+						DNSRdataAddress addr = (DNSRdataAddress) adtl.getData();
+						address = addr.getAddress();
+						break;
+					}
+				}
+			}
+			ttl--;	
+		}
+		server.close();
+        socket.close();
+        System.exit(0);
+	}
+	
+	private static void sendToClient(DNS dnsPkt, DatagramPacket toReturnToSender) throws IOException{
+		DatagramPacket answer = new DatagramPacket(dnsPkt.serialize() , 0, dnsPkt.getLength(), toReturnToSender.getSocketAddress());
+		System.out.println("sending answer");
+		server.send(answer);
+		System.out.println("answer sent");
+	}
+	
+	private static void printInfo(DNS pkt){
+		DNSQuestion question = pkt.getQuestions().get(0);
+
+		System.out.println("Question");
+		System.out.println(pkt.getQuestions().get(0).toString());
+		System.out.println("Answers");
+
+		for(DNSResourceRecord ans : pkt.getAnswers()){
+			System.out.println(ans.toString());
+		}
+		System.out.println("Authority");
+		for(DNSResourceRecord auth : pkt.getAuthorities()){
+			System.out.println(auth.toString());
+		}
+		System.out.println("Additional");
+		for(DNSResourceRecord addt : pkt.getAdditional()){
+			System.out.println(addt.toString());
+		}
 	}
 }
