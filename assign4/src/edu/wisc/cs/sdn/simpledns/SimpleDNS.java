@@ -135,50 +135,91 @@ public class SimpleDNS
 		boolean done = false;
 		address = InetAddress.getByName(ip);
 		int ttl = 100; //incase host unknown
-
-		while(!done || (ttl > 0)){
-			System.out.println("constructed query");
+		DNS toSendToHost = dnsPkt;
+		
+		while(!done && (ttl > 0)){
+			//System.out.println("constructed query");
 			query = new DatagramPacket(dnsPkt.serialize(), 0, dnsPkt.getLength(), address, DNSPORT);
+			//System.out.println("Before Send "+dnsPkt.toString());
 
-			System.out.println("sending query");
+			//System.out.println("sending query");
 			socket.send(query);
-
-			System.out.println("waiting to receive packet");
+        
+			//System.out.println("waiting to receive packet");
 
 			socket.receive(new DatagramPacket(packet, packet.length));
 
-			System.out.println("received packet!!!!");
+			//System.out.println("received packet!!!!");
 
 			dnsPkt = DNS.deserialize(packet, packet.length);    
-			printInfo(dnsPkt);
-
+			//printInfo(dnsPkt);
+			//System.out.println("After Send "+dnsPkt.toString());
 			if(!dnsPkt.isRecursionDesired()){
 				//forward back to host
 				sendToClient(dnsPkt, toReturnToSender);
 				done = true;
 			}
 			else{
-				List<DNSResourceRecord> answers = dnsPkt.getAnswers();
-				//once we are finished... maybe
-				if(answers.size() > 0){
-					System.out.println("ever here?");
-					sendToClient(dnsPkt, toReturnToSender);
-					done = true;
-				}
 				dnsPkt.setQuery(true);
 				for(DNSResourceRecord adtl : dnsPkt.getAdditional()){
 					if(adtl.getType() == DNS.TYPE_A || adtl.getType() == DNS.TYPE_AAAA){
 						DNSRdataAddress addr = (DNSRdataAddress) adtl.getData();
-						address = addr.getAddress();
+						String a = addr.toString();
+						address = InetAddress.getByName(a);
+						//System.out.println(address.toString());
 						break;
 					}
 				}
+				
+				SimpleDNS.addEntriesToHostPkt(dnsPkt, toSendToHost);
+
+				List<DNSResourceRecord> answers = dnsPkt.getAnswers();
+				//once we are finished... maybe
+				if(answers.size() > 0){
+					for(DNSResourceRecord ans : dnsPkt.getAnswers()){
+						toSendToHost.addAnswer(ans);
+					}
+					//System.out.println("ever here?");
+					printInfo(toSendToHost);
+					sendToClient(toSendToHost, toReturnToSender);
+					done = true;
+				}
 			}
+
+			SimpleDNS.prepareNewQuery(dnsPkt);
+			
 			ttl--;	
 		}
 		server.close();
         socket.close();
         System.exit(0);
+	}
+	
+	private static void addEntriesToHostPkt(DNS pkt, DNS toSend){
+		int adtlSize = pkt.getAdditional().size();
+		int authSize = pkt.getAuthorities().size();
+
+		for(int i = 0; i < adtlSize - 1; i++){
+			toSend.addAdditional(pkt.getAdditional().get(i));
+		}
+		for(int i = 0; i < authSize; i++){
+			toSend.addAuthority(pkt.getAuthorities().get(i));
+		}
+	}
+	
+	private static void prepareNewQuery(DNS pkt){
+		
+		int adtlSize = pkt.getAdditional().size();
+		int authSize = pkt.getAuthorities().size();
+		pkt.setQuery(true);
+		pkt.setRecursionAvailable(true);
+		pkt.setRecursionAvailable(true);
+		for(int i = 0; i < adtlSize - 1; i++){
+			pkt.removeAdditional(pkt.getAdditional().get(0));
+		}
+		for(int i = 0; i < authSize; i++){
+			pkt.removeAuthority(pkt.getAuthorities().get(0));
+		}
 	}
 	
 	private static void sendToClient(DNS dnsPkt, DatagramPacket toReturnToSender) throws IOException{
@@ -189,8 +230,6 @@ public class SimpleDNS
 	}
 	
 	private static void printInfo(DNS pkt){
-		DNSQuestion question = pkt.getQuestions().get(0);
-
 		System.out.println("Question");
 		System.out.println(pkt.getQuestions().get(0).toString());
 		System.out.println("Answers");
